@@ -39,8 +39,8 @@ class TickAccumulation:
 
     @property
     def adjusted_oi(self) -> int:
-        """Estimated OI = opening OI + net volume."""
-        return self.opening_oi + self.net_volume
+        """Estimated OI = opening OI + net volume, clamped to 0."""
+        return max(0, self.opening_oi + self.net_volume)
 
     def to_dict(self) -> Dict:
         """Serialize to dictionary."""
@@ -411,7 +411,7 @@ def get_oi_adjustment_info(
     has_data = breakdown["opening_oi"] > 0 or breakdown["buy_volume"] > 0 or breakdown["sell_volume"] > 0
 
     net_adjustment = breakdown["buy_volume"] - breakdown["sell_volume"]
-    adjusted_oi = breakdown["opening_oi"] + net_adjustment
+    adjusted_oi = max(0, breakdown["opening_oi"] + net_adjustment)  # Clamp to 0
 
     return {
         "has_tick_data": has_data,

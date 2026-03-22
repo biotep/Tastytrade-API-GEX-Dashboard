@@ -193,7 +193,7 @@ class TestApplyAdjustedOI:
         shutil.rmtree(temp_dir)
 
     def test_apply_to_option_data(self, temp_data_dir):
-        """Should update option_data dict with adjusted OI."""
+        """Should keep raw OI for calculations, store adjusted OI separately."""
         from utils.tick_data_manager import TickDataManager
 
         manager = TickDataManager(expiry="260312", data_folder=temp_data_dir)
@@ -208,10 +208,12 @@ class TestApplyAdjustedOI:
 
         updated = manager.apply_adjusted_oi(option_data)
 
-        # Call should have adjusted OI
-        assert updated[".SPXW260312C5700"]["oi"] == 1070  # 1000 + 100 - 30
-        assert updated[".SPXW260312C5700"]["oi_adjusted"] is True
+        # Raw OI should be preserved for GEX/Vanna/Charm calculations
+        assert updated[".SPXW260312C5700"]["oi"] == 1000  # Raw OI preserved
+        # Adjusted OI stored separately for display
+        assert updated[".SPXW260312C5700"]["oi_adjusted_value"] == 1070  # 1000 + 100 - 30
+        assert updated[".SPXW260312C5700"]["oi_has_tick_data"] is True
 
         # Put should keep raw OI (no tick data)
         assert updated[".SPXW260312P5700"]["oi"] == 800
-        assert updated[".SPXW260312P5700"].get("oi_adjusted") is False
+        assert updated[".SPXW260312P5700"]["oi_has_tick_data"] is False

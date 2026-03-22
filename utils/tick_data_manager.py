@@ -21,7 +21,7 @@ from utils.tick_accumulator import (
     get_effective_oi,
 )
 from utils.app_paths import get_data_folder
-from utils.delta_flow_calculator import DeltaFlowCalculator, DeltaFlowDirection
+from utils.delta_flow_calculator import DeltaFlowCalculator, DeltaFlowDirection, calculate_delta_weighted_flow
 
 logger = logging.getLogger(__name__)
 
@@ -219,13 +219,21 @@ class TickDataManager:
 
     def apply_adjusted_oi(self, option_data: Dict) -> Dict:
         """
-        Apply adjusted OI to option data dictionary.
+        Add adjusted OI info to option data dictionary.
+
+        IMPORTANT: Raw OI is kept for GEX/Vanna/Charm calculations.
+        Adjusted OI is stored separately for display purposes only.
+
+        The simple buy-sell adjusted OI formula is unreliable because:
+        - Same contract can trade multiple times intraday
+        - Can't distinguish opening vs closing trades
+        - Results in impossible negative values
 
         Args:
             option_data: Dict mapping symbol -> {oi, gamma, ...}
 
         Returns:
-            Updated option_data with adjusted OI where available
+            Updated option_data with adjusted OI info (raw OI preserved)
         """
         result = {}
         for symbol, data in option_data.items():
@@ -233,13 +241,16 @@ class TickDataManager:
             adjusted_oi = self.get_adjusted_oi(symbol)
 
             result[symbol] = data.copy()
+            # Keep raw OI for calculations (GEX, Vanna, Charm)
+            result[symbol]["oi"] = raw_oi
 
             if adjusted_oi is not None:
-                result[symbol]["oi"] = adjusted_oi
-                result[symbol]["oi_adjusted"] = True
-                result[symbol]["oi_raw"] = raw_oi
+                # Store adjusted OI separately for display only
+                result[symbol]["oi_adjusted_value"] = adjusted_oi
+                result[symbol]["oi_has_tick_data"] = True
             else:
-                result[symbol]["oi_adjusted"] = False
+                result[symbol]["oi_adjusted_value"] = raw_oi
+                result[symbol]["oi_has_tick_data"] = False
 
         return result
 
@@ -250,3 +261,59 @@ class TickDataManager:
     def get_last_save_time(self) -> Optional[str]:
         """Get the last save timestamp."""
         return self.accumulator._last_save
+
+    def calculate_delta_from_accumulated(self, greeks_data: Dict) -> float:
+        """
+        Calculate delta flow from already-accumulated tick data.
+
+        This fixes the timing issue where ticks are collected before
+        greeks_data is available. Call this after greeks are fetched.
+
+        Args:
+            greeks_data: Dict mapping symbol -> {delta, ...}
+
+        Returns:
+            Total customer delta (positive = customers long, negative = short)
+        """
+        if self.delta_calculator is None:
+            self.delta_calculator = DeltaFlowCalculator()
+
+        # Reset calculator to avoid double-counting from future live ticks
+        self.delta_calculator.reset()
+
+        # Get all symbols with tick data
+        for symbol in self.accumulator.get_all_symbols():
+            breakdown = self.accumulator.get_volume_breakdown(symbol)
+            delta = greeks_data.get(symbol, {}).get("delta", 0)
+
+            if delta == 0:
+                continue
+
+            buy_volume = breakdown["buy_volume"]
+            sell_volume = breakdown["sell_volume"]
+
+            # Process accumulated buy volume
+            if buy_volume > 0:
+                self.delta_calculator.process_trade(
+                    symbol=symbol,
+                    aggressor_side="BUY",
+                    contracts=buy_volume,
+                    delta=delta,
+                )
+
+            # Process accumulated sell volume
+            if sell_volume > 0:
+                self.delta_calculator.process_trade(
+                    symbol=symbol,
+                    aggressor_side="SELL",
+                    contracts=sell_volume,
+                    delta=delta,
+                )
+
+        logger.info(
+            f"Calculated delta from {len(self.accumulator.get_all_symbols())} symbols: "
+            f"{self.delta_calculator.cumulative_customer_delta:,.0f} delta, "
+            f"{self.delta_calculator.trade_count} trades"
+        )
+
+        return self.delta_calculator.cumulative_customer_delta

@@ -13,7 +13,9 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 
-DELTA_FLOW_FOLDER = "data/delta_flow_history"
+from utils.app_paths import get_data_folder
+
+DELTA_FLOW_FOLDER = get_data_folder("delta_flow_history")
 
 ES_MULTIPLIER = 50
 

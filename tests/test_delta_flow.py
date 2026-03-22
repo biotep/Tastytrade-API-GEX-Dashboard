@@ -612,3 +612,53 @@ class TestWebSocketDeltaFlowIntegration:
 
         direction = manager.get_delta_flow_direction()
         assert direction == DeltaFlowDirection.NEUTRAL
+
+    def test_calculate_delta_from_accumulated(self):
+        """
+        TickDataManager can calculate delta from previously accumulated ticks.
+
+        This fixes the timing issue where ticks are collected before
+        greeks_data is available.
+        """
+        from utils.tick_data_manager import TickDataManager
+
+        manager = TickDataManager(expiry="260313", auto_load=False)
+
+        # Simulate ticks accumulated WITHOUT delta calculator
+        # (as happens during the fetch)
+        manager.accumulator.add_tick(".SPXW260313C6000", 100, "BUY")
+        manager.accumulator.add_tick(".SPXW260313C6000", 30, "SELL")
+        manager.accumulator.add_tick(".SPXW260313P6000", 50, "BUY")
+
+        # Now greeks are available (after fetch)
+        greeks_data = {
+            ".SPXW260313C6000": {"delta": 0.50},  # Call
+            ".SPXW260313P6000": {"delta": -0.45},  # Put
+        }
+
+        # Calculate delta from accumulated ticks
+        customer_delta = manager.calculate_delta_from_accumulated(greeks_data)
+
+        # Call: (100 BUY - 30 SELL) * 0.50 * 100 = 70 * 50 = 3,500
+        # Put: (50 BUY) * (-0.45) * 100 = -2,250
+        # Total = 3,500 - 2,250 = 1,250
+        assert customer_delta == 1250
+
+        # Delta calculator should be set now
+        assert manager.delta_calculator is not None
+        assert manager.delta_calculator.trade_count == 3  # 3 trade batches
+
+    def test_calculate_delta_from_accumulated_empty(self):
+        """Should handle empty accumulated data."""
+        from utils.tick_data_manager import TickDataManager
+
+        manager = TickDataManager(expiry="260313", auto_load=False)
+
+        greeks_data = {
+            ".SPXW260313C6000": {"delta": 0.50},
+        }
+
+        customer_delta = manager.calculate_delta_from_accumulated(greeks_data)
+
+        assert customer_delta == 0
+        assert manager.delta_calculator.trade_count == 0

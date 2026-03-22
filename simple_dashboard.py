@@ -352,7 +352,7 @@ def aggregate_by_strike(option_data, tick_manager=None):
                 'put_iv': None,
                 'buy_volume': 0,
                 'sell_volume': 0,
-                'oi_adjusted': False,
+                'has_tick_data': False,
             }
 
         # Convert to numbers (might be strings from WebSocket or NaN)
@@ -388,8 +388,8 @@ def aggregate_by_strike(option_data, tick_manager=None):
             breakdown = tick_manager.get_volume_breakdown(symbol)
             strike_data[strike]['buy_volume'] += breakdown['buy_volume']
             strike_data[strike]['sell_volume'] += breakdown['sell_volume']
-            if data.get('oi_adjusted'):
-                strike_data[strike]['oi_adjusted'] = True
+            if data.get('oi_has_tick_data'):
+                strike_data[strike]['has_tick_data'] = True
 
     # Convert to DataFrame
     rows = []
@@ -408,7 +408,7 @@ def aggregate_by_strike(option_data, tick_manager=None):
             'buy_volume': data['buy_volume'],
             'sell_volume': data['sell_volume'],
             'net_flow': net_flow,
-            'oi_adjusted': data['oi_adjusted'],
+            'has_tick_data': data['has_tick_data'],
         })
 
     df = pd.DataFrame(rows)
@@ -659,18 +659,18 @@ def main():
                         if data.get("delta") is not None
                     }
 
-                    # Create or reuse delta flow calculator
-                    if 'delta_flow_calculator' not in st.session_state:
-                        st.session_state.delta_flow_calculator = DeltaFlowCalculator()
-                    delta_calc = st.session_state.delta_flow_calculator
+                    # Calculate delta flow from accumulated tick data
+                    # (ticks were collected during fetch, but greeks weren't available then)
+                    tick_manager.calculate_delta_from_accumulated(greeks_data)
+                    delta_calc = tick_manager.delta_calculator
+                    st.session_state.delta_flow_calculator = delta_calc
 
                     # Wire up calculator with tick manager for future messages
-                    tick_manager.set_delta_calculator(delta_calc)
                     tick_manager.set_greeks_data(greeks_data)
                     st.session_state.greeks_data = greeks_data
 
                     # Track delta flow history
-                    if delta_calc.trade_count > 0:
+                    if delta_calc and delta_calc.trade_count > 0:
                         delta_tracker = DeltaFlowHistoryTracker(expiry=expiration)
                         delta_tracker.add_record(
                             spot_price=price,

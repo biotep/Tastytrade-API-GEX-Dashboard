@@ -57,8 +57,8 @@ class TestAdjustedOIRetrieval:
         effective_oi = get_effective_oi(".SPXW260312C5700", raw_oi=0, accumulator=acc)
         assert effective_oi == 0
 
-    def test_get_oi_adjusted_can_be_negative(self, temp_data_dir):
-        """Adjusted OI can go negative (more sells than buys + opening)."""
+    def test_get_oi_adjusted_clamped_to_zero(self, temp_data_dir):
+        """Adjusted OI is clamped to 0 (can't go negative)."""
         from utils.tick_accumulator import TickDataAccumulator, get_effective_oi
 
         acc = TickDataAccumulator(expiry="260312", data_folder=temp_data_dir)
@@ -66,9 +66,10 @@ class TestAdjustedOIRetrieval:
         acc.add_tick(".SPXW260312C5700", 50, "BUY")
         acc.add_tick(".SPXW260312C5700", 200, "SELL")
 
-        # 100 + 50 - 200 = -50 (net closing)
+        # 100 + 50 - 200 = -50, but clamped to 0
+        # Note: For GEX calculations, raw_oi should be used, not adjusted OI
         effective_oi = get_effective_oi(".SPXW260312C5700", raw_oi=100, accumulator=acc)
-        assert effective_oi == -50
+        assert effective_oi == 0  # Clamped to 0, not -50
 
 
 class TestOIAdjustmentInfo:
